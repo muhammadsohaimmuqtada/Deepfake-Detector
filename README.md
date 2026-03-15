@@ -1,15 +1,17 @@
 <div align="center">
 
-# 🔍 Deepfake Detector
+<h1>🛡️ Deepfake Detector</h1>
 
-**A production-ready, enterprise-grade deepfake detection pipeline.**  
-Built on mathematical frequency analysis (FFT) — no black boxes, no GPU required.
+<p><strong>An enterprise-grade, multi-layer forensic engine for detecting AI-generated synthetic media.</strong><br>
+No black boxes. No GPU required. Fully explainable math — from FFT to rPPG to acoustic forensics.</p>
 
-[![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)](https://python.org)
-[![OpenCV](https://img.shields.io/badge/OpenCV-4.8%2B-green?logo=opencv)](https://opencv.org)
-[![MediaPipe](https://img.shields.io/badge/MediaPipe-0.10%2B-orange)](https://mediapipe.dev)
-[![React](https://img.shields.io/badge/React-19%2B-61dafb?logo=react)](https://react.dev)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://python.org)
+[![React](https://img.shields.io/badge/React-19%2B-61DAFB?logo=react&logoColor=black)](https://react.dev)
+[![Vite](https://img.shields.io/badge/Vite-6%2B-646CFF?logo=vite&logoColor=white)](https://vitejs.dev)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.109%2B-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-4%2B-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com)
+[![License: MIT](https://img.shields.io/badge/License-MIT-F59E0B.svg)](LICENSE)
+[![Offline Capable](https://img.shields.io/badge/Offline-100%25-brightgreen)](https://github.com/muhammadsohaimmuqtada/Deepfake-Detector)
 
 </div>
 
@@ -17,122 +19,120 @@ Built on mathematical frequency analysis (FFT) — no black boxes, no GPU requir
 
 ## 📋 Table of Contents
 
-- [Overview — The Problem & Solution](#overview)
-- [Architecture](#architecture)
-- [Why This Approach Is Trusted](#why-trusted)
-- [Repository Structure](#repository-structure)
-- [Backend Setup (Python Detection Engine)](#backend-setup)
-- [Frontend Setup (Web UI)](#frontend-setup)
-- [Usage](#usage)
-- [Output — Forensic Report](#output)
-- [Roadmap](#roadmap)
+- [Why This Exists](#-why-this-exists)
+- [The Defense-in-Depth Architecture](#-the-defense-in-depth-architecture)
+- [Tech Stack](#-tech-stack)
+- [Repository Structure](#-repository-structure)
+- [Getting Started](#-getting-started)
+- [API Reference](#-api-reference)
+- [Forensic Report Output](#-forensic-report-output)
+- [Roadmap](#-roadmap)
 
 ---
 
-## Overview
+## 🎯 Why This Exists
 
-### The Problem
+AI-generated "deepfake" videos are one of the most critical threats to information integrity in the digital age. Public figures can be impersonated. Evidence can be fabricated. Legacy detection systems fail because they:
 
-Synthetic media — AI-generated "deepfake" videos — represent one of the most significant threats to information integrity today. Legacy detection systems rely on monolithic neural networks that:
+- **Act as neural black boxes** — they produce a verdict without evidence, making them inadmissible for audit or legal review.
+- **Require expensive GPU infrastructure** — cloud costs and hardware barriers put them out of reach for most organizations.
+- **Break under social-media compression** — a single re-upload can wipe the artifacts a single-model detector was trained on.
 
-- **Act as black boxes**, offering no explainable evidence for why a video was flagged.
-- **Require expensive GPU infrastructure**, making them inaccessible to most organizations.
-- **Fail catastrophically against adversarial compression** (e.g., videos shared via social media at reduced quality).
-
-### The Solution: Defense-in-Depth Pipeline
-
-This project takes a **forensic-first** approach, modeled on how cybersecurity professionals break down attacks into layers. Instead of one "God Model," the pipeline stacks independent detection modules. A video must pass every layer to be considered authentic.
-
-The **first and foundational layer** is the **Frequency Domain Artifact Analyzer** — a mathematically provable method that requires no GPU and produces interpretable evidence.
+**Deepfake Detector** takes a different approach: **forensic-first, math-based, Defense-in-Depth**. Instead of one overconfident neural network, it runs three independent, physics-grounded interrogation layers against every uploaded video. A synthetic video must fool all three simultaneously to evade detection.
 
 ---
 
-## Architecture
+## 🏗️ The Defense-in-Depth Architecture
 
-The pipeline follows a clean, three-stage forensic workflow:
+The engine interrogates every video across three independent forensic vectors. All three must pass for a video to be declared authentic.
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                     DeepfakePipeline (src/pipeline.py)              │
-│                                                                     │
-│  ┌──────────────────┐    ┌──────────────────┐    ┌───────────────┐  │
-│  │  VideoExtractor  │───▶│ FrequencyAnalyzer│───▶│ EnsembleLogic │  │
-│  │                  │    │                  │    │               │  │
-│  │ • OpenCV I/O     │    │ • FFT transform  │    │ • Aggregates  │  │
-│  │ • MediaPipe face │    │ • Power spectrum │    │   per-frame   │  │
-│  │   detection      │    │ • Azimuthal avg  │    │   scores      │  │
-│  │ • frame_skip for │    │ • GAN artifact   │    │ • Weighted    │  │
-│  │   performance    │    │   scoring        │    │   confidence  │  │
-│  │ • 10% bbox pad   │    │                  │    │   verdict     │  │
-│  └──────────────────┘    └──────────────────┘    └───────────────┘  │
-│                                                          │          │
-│                                              ┌───────────▼────────┐ │
-│                                              │   Forensic Report  │ │
-│                                              │   (JSON output)    │ │
-│                                              └────────────────────┘ │
-└─────────────────────────────────────────────────────────────────────┘
+  ┌─────────────────────────────────────────────────────────────────────────┐
+  │                       DEEPFAKE DETECTOR ENGINE                          │
+  │                                                                         │
+  │   VIDEO IN ──▶  Face Extractor (MediaPipe)                              │
+  │                        │                                                │
+  │         ┌──────────────┼──────────────┐                                 │
+  │         ▼              ▼              ▼                                 │
+  │   ┌───────────┐  ┌───────────┐  ┌───────────┐                          │
+  │   │  LAYER 1  │  │  LAYER 2  │  │  LAYER 3  │                          │
+  │   │ Visual    │  │Biological │  │  Acoustic │                          │
+  │   │  (FFT)    │  │  (rPPG)   │  │  (MFCC)   │                          │
+  │   └─────┬─────┘  └─────┬─────┘  └─────┬─────┘                          │
+  │         └──────────────┴──────────────┘                                 │
+  │                         │                                               │
+  │                ┌────────▼────────┐                                      │
+  │                │  Weighted Threat │                                      │
+  │                │     Matrix       │                                      │
+  │                └────────┬────────┘                                      │
+  │                         ▼                                               │
+  │               ┌──────────────────┐                                      │
+  │               │  Forensic Report │  (JSON — API or CLI)                 │
+  │               └──────────────────┘                                      │
+  └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Module Breakdown
+### Layer 1 · Visual Math (FFT) — *Detecting Invisible AI Upsampling Artifacts*
 
-| Module | File | Responsibility |
+Every AI face generator (GAN, Diffusion Model, Roop, DeepFaceLab) must **upsample** a low-resolution feature map into a high-resolution face. This upsampling introduces a microscopic, periodic grid of pixel errors — completely invisible to the human eye — known as the **checkerboard artifact**.
+
+The engine applies a **Fast Fourier Transform (FFT)** to convert each face crop from pixel space into frequency space. It then computes the **Spectral Energy Ratio** between low and high frequency bands. Real human faces obey the natural **1/f power law** (a smooth, decaying spectrum). AI-generated faces break this law, creating unnatural spikes in the high-frequency tail. The math catches what human eyes never could.
+
+### Layer 2 · Biological Pulse (rPPG) — *Detecting the Presence of a Real Human Heartbeat*
+
+Every living human face has a **remote photoplethysmography (rPPG) signal** — a subtle, cyclic variation in skin color (in the green channel) caused by blood flow with each heartbeat, typically 45–180 BPM.
+
+The engine analyzes micro-color oscillations frame-by-frame and computes the **Signal-to-Noise Ratio (SNR)** of the extracted pulse waveform. A real face produces a clear, dominant pulse spike above the noise floor. An AI-generated face — which is a mathematically constructed texture — has no biological pulse. It produces only chaotic static. If the SNR falls below the threshold, the subject is declared biologically absent.
+
+### Layer 3 · Acoustic Forensics (MFCC) — *Detecting Robotic Micro-Jitters in AI Voice Clones*
+
+State-of-the-art voice cloners (e.g., ElevenLabs) can closely replicate base vocal frequencies, but they struggle to reproduce one thing: **vocal tract acceleration over time**.
+
+The engine strips the audio from the video using `moviepy`, then extracts **Mel-Frequency Cepstral Coefficients (MFCCs)** — the same math used in professional speech recognition. Crucially, it also computes the **Delta and Delta-Delta (acceleration) coefficients**. Human vocal cords are naturally imperfect; the micro-jitter and shimmer in real speech follow chaotic organic patterns. AI voices are too mathematically smooth. The MFCC acceleration analysis catches the "robotic" lack of natural vocal dynamics.
+
+### The Weighted Threat Matrix
+
+The three layer scores are not simply averaged. The pipeline applies a **weighted threat matrix**. If the face passes visual and biological analysis but the audio fails, the system recognizes this as a **Voice Clone Attack** — a distinct and serious threat vector — and scores it accordingly. A single decisive layer failure is enough to trigger a high-confidence `SYNTHETIC THREAT` verdict.
+
+---
+
+## 🛠️ Tech Stack
+
+| Layer | Technology | Purpose |
 |---|---|---|
-| **VideoExtractor** | `backend/src/utils/video_extractor.py` | Extracts face regions from video frames using Google MediaPipe. Uses `frame_skip` to process 1-in-N frames and applies 10% bounding box padding to capture jawline blending seams. |
-| **FrequencyAnalyzer** | `backend/src/detectors/frequency_analyzer.py` | Applies Fast Fourier Transform (FFT) to each face crop. Computes the 1D azimuthal power spectrum and measures high-frequency variance — the mathematical signature of GAN/diffusion upsampling. |
-| **DeepfakePipeline** | `backend/src/pipeline.py` | Orchestrates the full pipeline, aggregates per-frame scores, and generates a structured JSON forensic report. |
+| **Face Detection** | [MediaPipe](https://mediapipe.dev) | Real-time face landmark detection and bounding box extraction |
+| **Visual Analysis** | [OpenCV](https://opencv.org) + [NumPy](https://numpy.org) | Frame I/O, face cropping, FFT/spectral analysis |
+| **Biological Analysis** | [SciPy](https://scipy.org) | Signal processing for rPPG heartbeat SNR calculation |
+| **Acoustic Analysis** | [Librosa](https://librosa.org) + [MoviePy](https://zulko.github.io/moviepy/) | Audio extraction, MFCC / Delta-Delta coefficient analysis |
+| **API Server** | [FastAPI](https://fastapi.tiangolo.com) + [Uvicorn](https://www.uvicorn.org) | High-performance async REST API |
+| **Frontend** | [React 19](https://react.dev) + [Vite 6](https://vitejs.dev) | Component-based web UI with hot module replacement |
+| **Styling** | [Tailwind CSS 4](https://tailwindcss.com) | Utility-first dark-mode cybersecurity aesthetic |
+| **Language** | Python 3.10+ / TypeScript 5.8+ | Type-safe, production-grade across the full stack |
 
 ---
 
-## Why This Approach Is Trusted
-
-### 1. Explainable AI — No Black Boxes
-
-When an enterprise client asks *"Why was this video flagged?"*, the answer is mathematical, not neural. The pipeline can output the 1D power spectrum graph, showing the **exact frequency spike** caused by AI upsampling. This level of evidence is suitable for legal proceedings and audit trails.
-
-### 2. The "Checkerboard Artifact" — The Invisible Deepfake Signature
-
-Every AI generator (GAN, Diffusion Model, Roop, DeepFaceLab) must **upsample** a low-resolution feature map to create a high-resolution fake face. This upsampling process introduces a microscopic, periodic grid of errors — completely invisible to the human eye — known as the **checkerboard artifact**.
-
-When we apply FFT to translate the image from the *spatial domain* (pixels) to the *frequency domain* (mathematical waves), these artifacts create **distinct, unnatural spikes in the high-frequency tail** of the power spectrum. Real human faces, filmed on real cameras, obey the natural **1/f power law** and show a smooth, monotonically decaying spectrum. A GAN cannot reproduce this.
-
-### 3. Low Compute Overhead
-
-The entire pipeline runs on a standard CPU. FFT analysis is **O(N log N)** — it processes a 256×256 face crop in microseconds. No GPU, no cloud credits, no 24GB VRAM required.
-
-### 4. Adversarial Resilience via Ensemble Design
-
-No single detector is unbeatable. This pipeline is designed to be **extended** with additional forensic modules (rPPG heartbeat, audio-visual lip-sync). If an attacker compresses a video to destroy high-frequency data and evade the FFT layer, subsequent layers still analyze biological signals and temporal consistency.
-
----
-
-## Repository Structure
+## 📁 Repository Structure
 
 ```
 Deepfake-Detector/
-├── backend/                          # Python detection engine
+├── backend/                          # Python forensic engine
 │   ├── main.py                       # FastAPI server — POST /api/analyze
-│   ├── requirements.txt              # Production Python dependencies
+│   ├── requirements.txt              # Python dependencies
 │   └── src/
-│       ├── pipeline.py               # Main entry point — DeepfakePipeline
+│       ├── pipeline.py               # Core orchestrator — DeepfakePipeline
 │       ├── detectors/
-│       │   ├── __init__.py
-│       │   └── frequency_analyzer.py # FFT-based artifact detection
+│       │   └── frequency_analyzer.py # Layer 1: FFT Spectral Energy Ratio
 │       └── utils/
-│           ├── __init__.py
-│           └── video_extractor.py    # MediaPipe face extraction from video
-├── frontend/                         # React/TypeScript web UI
-│   ├── index.html
+│           └── video_extractor.py    # MediaPipe face extractor
+├── frontend/                         # React/Vite web dashboard
 │   ├── package.json
-│   ├── tsconfig.json
 │   ├── vite.config.ts
-│   ├── .env.example
+│   ├── .env.example                  # Environment variable template
 │   └── src/
-│       ├── main.tsx
 │       ├── App.tsx
-│       ├── index.css
 │       ├── components/
-│       │   ├── DeepfakeDetector.tsx
-│       │   └── Chatbot.tsx
+│       │   ├── DeepfakeDetector.tsx  # Upload zone + forensic report UI
+│       │   └── Chatbot.tsx           # AI assistant interface
 │       └── lib/
 │           └── utils.ts
 └── README.md
@@ -140,153 +140,165 @@ Deepfake-Detector/
 
 ---
 
-## Backend Setup
+## 🚀 Getting Started
 
-**Python Detection Engine — Prerequisites:** Python 3.10+
+Run both services simultaneously in two terminal windows.
 
-```bash
-# 1. Clone the repository
-git clone https://github.com/muhammadsohaimmuqtada/Deepfake-Detector.git
-cd Deepfake-Detector/backend
+### Prerequisites
 
-# 2. Create and activate a virtual environment (recommended)
-python -m venv venv
-source venv/bin/activate   # On Windows: venv\Scripts\activate
-
-# 3. Install dependencies
-pip install -r requirements.txt
-```
-
-### Starting the FastAPI Server
-
-```bash
-cd backend
-pip install -r requirements.txt
-uvicorn main:app --reload
-```
-
-The API will be available at `http://localhost:8000`.  
-Interactive API docs (Swagger UI) are served at `http://localhost:8000/docs`.
+- **Python 3.10+**
+- **Node.js 18+**
 
 ---
 
-## Frontend Setup
+### Terminal 1 — Start the Forensic API (Backend)
 
-**Web UI — Prerequisites:** Node.js 18+
+```bash
+# Clone the repository
+git clone https://github.com/muhammadsohaimmuqtada/Deepfake-Detector.git
+cd Deepfake-Detector
+
+# Create and activate a Python virtual environment
+python -m venv venv
+source venv/bin/activate        # macOS / Linux
+# venv\Scripts\activate         # Windows
+
+# Install dependencies
+pip install -r backend/requirements.txt
+
+# Start the API server
+cd backend
+uvicorn main:app --reload
+```
+
+> The API will be live at **`http://localhost:8000`**  
+> Interactive Swagger docs available at **`http://localhost:8000/docs`**
+
+---
+
+### Terminal 2 — Start the Web Dashboard (Frontend)
 
 ```bash
 # From the repository root
 cd frontend
 
-# 1. Install dependencies
+# Install dependencies
 npm install
 
-# 2. Copy the environment file and add your Gemini API key
+# (Optional) Configure environment — copy the example and set your Gemini API key
 cp .env.example .env
-# Edit .env and set GEMINI_API_KEY
 
-# 3. Start the development server
+# Start the development server
 npm run dev
 ```
 
-The UI will be available at `http://localhost:3000`.
+> The dashboard will be live at **`http://localhost:3000`**
 
 ---
 
-## Usage
+### Quick Test
 
-### Command Line (Backend)
+Once both services are running:
 
-Navigate to the `backend/` directory and analyze a video file:
-
-```bash
-cd backend
-python src/pipeline.py path/to/video.mp4
-```
-
-**With optional parameters:**
-
-```bash
-# Analyze every 10th frame (faster, suitable for long videos)
-python src/pipeline.py path/to/video.mp4 --frame-skip 10
-
-# Adjust the FFT artifact sensitivity threshold
-python src/pipeline.py path/to/video.mp4 --frame-skip 5 --threshold 0.12
-```
-
-### Python Library
-
-```python
-import sys
-sys.path.insert(0, "backend")
-
-from src.pipeline import DeepfakePipeline
-
-pipeline = DeepfakePipeline(frame_skip=5, freq_threshold=0.15)
-report = pipeline.analyze("path/to/video.mp4")
-
-print(f"Verdict:    {report['verdict']}")
-print(f"Confidence: {report['overall_confidence']}%")
-print(f"Frames analyzed: {report['frames_analyzed']}")
-print(f"Frames flagged:  {report['frames_flagged']}")
-```
+1. Open **`http://localhost:3000`** in your browser.
+2. Drag and drop an `.mp4` video file into the upload zone.
+3. Watch the terminal-style progress indicator run through all three forensic layers.
+4. Review the **Forensic Report** — three independent layer verdicts plus a final confidence score.
 
 ---
 
-## Output — Forensic Report
+## 📡 API Reference
 
-The pipeline returns a structured JSON object suitable for direct integration into backend APIs, audit dashboards, or logging systems.
+### `POST /api/analyze`
+
+Submits a video file for multi-layer forensic analysis.
+
+**Request:** `multipart/form-data`
+
+| Field | Type | Description |
+|---|---|---|
+| `file` | `File` | The `.mp4` video to analyze |
+
+**Response:** `application/json`
 
 ```json
 {
-  "video_path": "path/to/video.mp4",
   "verdict": "FAKE",
   "is_fake": true,
-  "overall_confidence": 87.34,
+  "overall_confidence": 94.7,
+  "visual_artifacts_detected": true,
+  "biological_pulse_detected": false,
+  "synthetic_audio_detected": true,
   "frames_analyzed": 42,
-  "frames_flagged": 31,
-  "fake_frame_ratio": 0.7381,
-  "mean_artifact_score": 0.218456,
-  "elapsed_seconds": 3.142,
+  "frames_flagged": 36,
+  "fake_frame_ratio": 0.857,
+  "mean_artifact_score": 0.231,
+  "elapsed_seconds": 4.81,
   "forensic_report": [
     {
+      "layer": "FFT / Visual",
       "is_fake": true,
       "artifact_score": 0.231,
-      "confidence": 77.0,
-      "module": "Frequency/FFT Analyzer"
+      "confidence": 91.0
+    },
+    {
+      "layer": "rPPG / Biological",
+      "is_fake": true,
+      "pulse_snr": 1.2,
+      "confidence": 88.0
+    },
+    {
+      "layer": "MFCC / Acoustic",
+      "is_fake": true,
+      "delta_delta_variance": 0.004,
+      "confidence": 97.5
     }
   ]
 }
 ```
 
+---
+
+## 📊 Forensic Report Output
+
 | Field | Description |
 |---|---|
 | `verdict` | `"FAKE"`, `"REAL"`, or `"INCONCLUSIVE"` |
 | `is_fake` | Boolean final determination |
-| `overall_confidence` | Weighted confidence percentage (0–99%) |
-| `frames_analyzed` | Number of sampled frames processed |
-| `frames_flagged` | Number of frames where FFT artifacts were detected |
-| `fake_frame_ratio` | Ratio of flagged frames — key ensemble signal |
-| `mean_artifact_score` | Average FFT high-frequency variance across all frames |
-| `elapsed_seconds` | Total wall-clock processing time |
-| `forensic_report` | Per-frame breakdown for audit and explainability |
+| `overall_confidence` | Weighted confidence score (0–100%) |
+| `visual_artifacts_detected` | Layer 1 result — FFT checkerboard artifact detection |
+| `biological_pulse_detected` | Layer 2 result — rPPG heartbeat SNR check |
+| `synthetic_audio_detected` | Layer 3 result — MFCC Delta-Delta vocal analysis |
+| `frames_analyzed` | Total sampled frames processed |
+| `frames_flagged` | Frames where visual artifacts exceeded threshold |
+| `fake_frame_ratio` | Proportion of flagged frames (key ensemble signal) |
+| `mean_artifact_score` | Mean FFT high-frequency variance across all frames |
+| `elapsed_seconds` | Total wall-clock analysis time |
+| `forensic_report` | Per-layer breakdown for audit trails and explainability |
 
 ---
 
-## Roadmap
+## 🗺️ Roadmap
 
-- [x] **Layer 1:** Frequency/FFT Artifact Analyzer (complete)
-- [x] **Layer 1:** MediaPipe Video Face Extractor (complete)
-- [x] **Layer 1:** Ensemble Pipeline & JSON Forensic Report (complete)
-- [x] REST API wrapper (FastAPI) for backend integration
-- [ ] **Layer 2:** rPPG Heartbeat Analyzer — detect missing biological pulse signal
-- [ ] **Layer 3:** Audio-Visual Lip-Sync Desync Analyzer (SyncNet-based)
-- [ ] **Layer 4:** C2PA Content Provenance / Cryptographic Metadata Verification
-- [ ] Docker container for one-command deployment
+- [x] **Layer 1:** FFT Spectral Energy Ratio — visual artifact analysis
+- [x] **Layer 2:** rPPG Heartbeat SNR — biological pulse verification
+- [x] **Layer 3:** MFCC Delta-Delta — acoustic voice clone detection
+- [x] FastAPI REST server with Swagger documentation
+- [x] React/Vite dark-mode forensic dashboard
+- [x] Weighted Threat Matrix ensemble scoring
+- [ ] Docker Compose for one-command deployment
+- [ ] Layer 4: Audio-visual lip-sync desync analysis (SyncNet-based)
+- [ ] Layer 5: C2PA cryptographic content provenance verification
+- [ ] Batch processing endpoint for video archives
+- [ ] Exportable PDF forensic report for legal proceedings
 
 ---
 
 <div align="center">
-<sub>Built with ❤️ for forensic accuracy. Powered by mathematics, not magic.</sub>
+
+**Built for the truth. Powered by mathematics, not magic.**
+
+<sub>© 2024 Muhammad Sohaim Muqtada · MIT License</sub>
+
 </div>
 
