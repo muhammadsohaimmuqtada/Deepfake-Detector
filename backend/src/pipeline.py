@@ -1,11 +1,19 @@
 """
 DeepfakePipeline — main entry point for the Deepfake Detector.
 
-Orchestrates the full forensic analysis pipeline:
-    VideoExtractor  →  FrequencyAnalyzer  →  Ensemble Scoring  →  Forensic Report
+Orchestrates the full forensic analysis pipeline (Defense-in-Depth):
+
+    VideoExtractor
+        ↓
+    Layer 1 — FrequencyAnalyzer  (per-frame FFT artifact detection)
+        ↓
+    Layer 2 — RPPGAnalyzer       (temporal heartbeat / rPPG analysis)
+        ↓
+    Ensemble Scoring  →  Forensic Report
 
 Usage (CLI):
     python src/pipeline.py <path_to_video> [--frame-skip N] [--threshold T]
+                                           [--rppg-window W] [--fps FPS]
 
 Usage (library):
     from src.pipeline import DeepfakePipeline
@@ -22,6 +30,7 @@ import time
 from typing import Any
 
 from src.detectors.frequency_analyzer import FrequencyAnalyzer
+from src.detectors.rppg_analyzer import RPPGAnalyzer
 from src.utils.video_extractor import VideoExtractor
 
 logging.basicConfig(
@@ -32,9 +41,20 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-# Ensemble decision threshold — percentage of frames flagged to call a video fake
+# ── Ensemble constants ────────────────────────────────────────────────────────
+# Layer 1 (FFT): percentage of frames flagged before calling a video fake
 FAKE_FRAME_RATIO_THRESHOLD = 0.40
 MAX_CONFIDENCE_PCT = 99.0
+
+# Layer 2 (rPPG): weight in the ensemble score (0–1); Layer 1 gets 1 - RPPG_WEIGHT
+RPPG_WEIGHT = 0.40
+FREQ_WEIGHT = 1.0 - RPPG_WEIGHT
+
+# Ensemble fake threshold — weighted combined score above this → FAKE
+ENSEMBLE_FAKE_THRESHOLD = 0.50
+
+# Default number of consecutive face frames fed to the rPPG analyzer
+DEFAULT_RPPG_WINDOW = 60
 
 
 class DeepfakePipeline:
@@ -42,26 +62,38 @@ class DeepfakePipeline:
     End-to-end deepfake detection pipeline.
 
     Combines:
-    - VideoExtractor: isolates face regions from sampled video frames.
-    - FrequencyAnalyzer: detects GAN/diffusion upsampling artifacts via FFT.
-    - Ensemble aggregation: aggregates per-frame scores to produce a final verdict.
+    - VideoExtractor : isolates face regions from sampled video frames.
+    - FrequencyAnalyzer (Layer 1): per-frame FFT-based GAN/diffusion artifact detection.
+    - RPPGAnalyzer   (Layer 2): temporal rPPG heartbeat analysis over a frame window.
+    - Ensemble aggregation: fuses both layer scores into a final verdict.
     """
 
     def __init__(
         self,
         frame_skip: int = 5,
         freq_threshold: float = 0.15,
+        rppg_window: int = DEFAULT_RPPG_WINDOW,
+        fps: float = 30.0,
     ):
         """
-        :param frame_skip: Analyze every Nth frame (reduces compute, preserves accuracy).
-        :param freq_threshold: FFT artifact score above which a single frame is flagged.
+        :param frame_skip:    Analyze every Nth frame (reduces compute, preserves accuracy).
+        :param freq_threshold: FFT artifact score above which a single frame is flagged (Layer 1).
+        :param rppg_window:   Number of consecutive face frames to pass to the rPPG analyzer.
+        :param fps:           Effective frame rate *after* frame-skip, used by the rPPG filter.
+                              Formula: effective_fps = source_fps / frame_skip.
         """
         self.extractor = VideoExtractor(frame_skip=frame_skip)
-        self.analyzer = FrequencyAnalyzer(high_freq_threshold=freq_threshold)
+        self.freq_analyzer = FrequencyAnalyzer(high_freq_threshold=freq_threshold)
+        self.rppg_analyzer = RPPGAnalyzer(fps=fps)
+        self.rppg_window = rppg_window
+
         logger.info(
-            "DeepfakePipeline ready — frame_skip=%d, freq_threshold=%.3f",
+            "DeepfakePipeline ready — frame_skip=%d, freq_threshold=%.3f, "
+            "rppg_window=%d, effective_fps=%.1f",
             frame_skip,
             freq_threshold,
+            rppg_window,
+            fps,
         )
 
     def analyze(self, video_path: str) -> dict[str, Any]:
@@ -77,10 +109,17 @@ class DeepfakePipeline:
         start_time = time.monotonic()
 
         frame_reports: list[dict[str, Any]] = []
+        # Collect face frames for the rPPG window
+        rppg_frame_buffer: list = []
 
         for face_image in self.extractor.extract_faces_from_video(video_path):
-            result = self.analyzer.detect_artifacts(face_image)
-            frame_reports.append(result)
+            # ── Layer 1: per-frame FFT analysis ──────────────────────────────
+            freq_result = self.freq_analyzer.detect_artifacts(face_image)
+            frame_reports.append(freq_result)
+
+            # ── Accumulate frames for Layer 2 ────────────────────────────────
+            if len(rppg_frame_buffer) < self.rppg_window:
+                rppg_frame_buffer.append(face_image)
 
         elapsed = time.monotonic() - start_time
 
@@ -96,45 +135,89 @@ class DeepfakePipeline:
                 "fake_frame_ratio": 0.0,
                 "mean_artifact_score": 0.0,
                 "elapsed_seconds": round(elapsed, 3),
-                "forensic_report": [],
+                "layer1_fft_report": [],
+                "layer2_rppg_report": None,
                 "message": "No faces could be detected. Video may be low quality or contain no human subjects.",
             }
 
+        # ── Layer 1 aggregation ───────────────────────────────────────────────
         frames_analyzed = len(frame_reports)
         frames_flagged = sum(1 for r in frame_reports if r["is_fake"])
         fake_frame_ratio = frames_flagged / frames_analyzed
-        mean_artifact_score = sum(r["artifact_score"] for r in frame_reports) / frames_analyzed
-        mean_confidence = sum(r["confidence"] for r in frame_reports) / frames_analyzed
+        mean_artifact_score = (
+            sum(r["artifact_score"] for r in frame_reports) / frames_analyzed
+        )
+        mean_freq_confidence = (
+            sum(r["confidence"] for r in frame_reports) / frames_analyzed
+        )
 
-        is_fake = fake_frame_ratio >= FAKE_FRAME_RATIO_THRESHOLD
+        # Layer 1 fake probability (0–1)
+        freq_fake_prob = fake_frame_ratio
+
+        # ── Layer 2: rPPG analysis on collected frame window ──────────────────
+        rppg_result = self.rppg_analyzer.analyze(rppg_frame_buffer)
+        rppg_conclusive = rppg_result.get("verdict") != "INCONCLUSIVE"
+
+        if rppg_conclusive:
+            # Convert rPPG confidence to a fake probability (0–1)
+            rppg_conf = float(rppg_result["confidence"]) / 100.0
+            rppg_fake_prob = rppg_conf if rppg_result["is_fake"] else (1.0 - rppg_conf)
+        else:
+            # Inconclusive → neutral; rely entirely on Layer 1
+            rppg_fake_prob = 0.5
+            logger.info("rPPG returned INCONCLUSIVE — ensemble relies solely on Layer 1.")
+
+        # ── Ensemble scoring ──────────────────────────────────────────────────
+        # Weighted combination of both layers → single ensemble fake probability
+        if rppg_conclusive:
+            ensemble_fake_prob = (
+                FREQ_WEIGHT * freq_fake_prob + RPPG_WEIGHT * rppg_fake_prob
+            )
+        else:
+            ensemble_fake_prob = freq_fake_prob
+
+        is_fake = ensemble_fake_prob >= ENSEMBLE_FAKE_THRESHOLD
         verdict = "FAKE" if is_fake else "REAL"
 
-        # Overall confidence — weighted by fake ratio when fake, inverse when real
+        # Overall confidence — how far from the decision boundary
         if is_fake:
-            overall_confidence = round(min(fake_frame_ratio * mean_confidence, MAX_CONFIDENCE_PCT), 2)
+            overall_confidence = round(
+                min(ensemble_fake_prob * MAX_CONFIDENCE_PCT, MAX_CONFIDENCE_PCT), 2
+            )
         else:
-            overall_confidence = round(min((1.0 - fake_frame_ratio) * mean_confidence, MAX_CONFIDENCE_PCT), 2)
+            overall_confidence = round(
+                min((1.0 - ensemble_fake_prob) * MAX_CONFIDENCE_PCT, MAX_CONFIDENCE_PCT), 2
+            )
 
         report = {
             "video_path": video_path,
             "verdict": verdict,
             "is_fake": is_fake,
             "overall_confidence": overall_confidence,
+            # ── Layer 1 summary ──
             "frames_analyzed": frames_analyzed,
             "frames_flagged": frames_flagged,
             "fake_frame_ratio": round(fake_frame_ratio, 4),
             "mean_artifact_score": round(mean_artifact_score, 6),
+            # ── Ensemble metrics ──
+            "ensemble_fake_probability": round(ensemble_fake_prob, 4),
+            "freq_layer_weight": 1.0 if not rppg_conclusive else FREQ_WEIGHT,
+            "rppg_layer_weight": RPPG_WEIGHT if rppg_conclusive else 0.0,
             "elapsed_seconds": round(elapsed, 3),
-            "forensic_report": frame_reports,
+            # ── Detailed per-layer reports ──
+            "layer1_fft_report": frame_reports,
+            "layer2_rppg_report": rppg_result,
         }
 
         logger.info(
-            "Analysis complete — verdict=%s, confidence=%.2f%%, frames_analyzed=%d, "
-            "frames_flagged=%d, elapsed=%.3fs",
+            "Analysis complete — verdict=%s, confidence=%.2f%%, ensemble_prob=%.4f, "
+            "frames=%d, flagged=%d, rppg_snr=%.3f, elapsed=%.3fs",
             verdict,
             overall_confidence,
+            ensemble_fake_prob,
             frames_analyzed,
             frames_flagged,
+            rppg_result.get("rppg_snr", 0.0),
             elapsed,
         )
         return report
@@ -143,7 +226,10 @@ class DeepfakePipeline:
 def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="deepfake-detector",
-        description="Production-ready Deepfake Detection Pipeline using FFT frequency analysis.",
+        description=(
+            "Production-ready Deepfake Detection Pipeline — "
+            "Layer 1: FFT frequency analysis | Layer 2: rPPG heartbeat analysis"
+        ),
     )
     parser.add_argument("video_path", help="Path to the video file to analyze.")
     parser.add_argument(
@@ -160,6 +246,21 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         metavar="T",
         help="FFT artifact score threshold per frame (default: 0.15).",
     )
+    parser.add_argument(
+        "--rppg-window",
+        type=int,
+        default=DEFAULT_RPPG_WINDOW,
+        metavar="W",
+        help=f"Number of face frames to use for rPPG analysis (default: {DEFAULT_RPPG_WINDOW}).",
+    )
+    parser.add_argument(
+        "--fps",
+        type=float,
+        default=30.0,
+        metavar="FPS",
+        help="Effective frames-per-second after frame-skip (default: 30.0). "
+             "Set to source_fps / frame_skip for accurate rPPG filtering.",
+    )
     return parser
 
 
@@ -170,6 +271,8 @@ if __name__ == "__main__":
     pipeline = DeepfakePipeline(
         frame_skip=args.frame_skip,
         freq_threshold=args.threshold,
+        rppg_window=args.rppg_window,
+        fps=args.fps,
     )
 
     try:
