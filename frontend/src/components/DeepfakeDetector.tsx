@@ -1,9 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
 import { GoogleGenAI, Type } from '@google/genai';
-import { Upload, FileVideo, FileImage, FileText, Loader2, AlertTriangle, CheckCircle, Info, X, ShieldAlert, ShieldCheck, Activity, BrainCircuit, Fingerprint, ScanSearch, Download, Database, Mic, Radar, Globe } from 'lucide-react';
+import { Upload, FileText, Loader2, AlertTriangle, CheckCircle, Info, X, ShieldAlert, ShieldCheck, Activity, BrainCircuit, Fingerprint, ScanSearch, Download, Database, Mic, Radar, Globe } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { Radar as RechartsRadar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer } from 'recharts';
+import { analyzeVideo, type ForensicReport } from '@/lib/analyzeService';
+import { VideoForensicsReport } from './VideoForensicsReport';
 
 type AnalysisResult = {
   verdict: 'AUTHENTIC' | 'SUSPICIOUS' | 'DEEPFAKE';
@@ -35,6 +37,16 @@ const ANALYSIS_STEPS = [
   "Compiling forensic report..."
 ];
 
+const VIDEO_ANALYSIS_STEPS = [
+  "Initializing Forensic Engine...",
+  "Extracting audio track...",
+  "Running FFT spectral analysis...",
+  "Analyzing biological pulse (rPPG)...",
+  "Processing acoustic forensics (MFCC)...",
+  "Computing ensemble verdict...",
+  "Compiling 3-pillar forensic report...",
+];
+
 export function DeepfakeDetector() {
   const [activeTab, setActiveTab] = useState<'media' | 'text'>('media');
   const [file, setFile] = useState<File | null>(null);
@@ -42,16 +54,21 @@ export function DeepfakeDetector() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisStep, setAnalysisStep] = useState(0);
   const [result, setResult] = useState<AnalysisResult | null>(null);
+  const [forensicReport, setForensicReport] = useState<ForensicReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [hexDump, setHexDump] = useState<string>('');
   const [fileMeta, setFileMeta] = useState<{name: string, size: string, type: string} | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  /** Returns true when the selected file should be routed to the FastAPI backend. */
+  const isVideoFile = (f: File) => f.type === 'video/mp4' || f.type.startsWith('video/');
+
   useEffect(() => {
     let interval: NodeJS.Timeout;
     if (isAnalyzing) {
+      const steps = file && isVideoFile(file) ? VIDEO_ANALYSIS_STEPS : ANALYSIS_STEPS;
       interval = setInterval(() => {
-        setAnalysisStep((prev) => (prev < ANALYSIS_STEPS.length - 1 ? prev + 1 : prev));
+        setAnalysisStep((prev) => (prev < steps.length - 1 ? prev + 1 : prev));
       }, 1500);
     } else {
       setAnalysisStep(0);
@@ -106,10 +123,27 @@ export function DeepfakeDetector() {
     setIsAnalyzing(true);
     setError(null);
     setResult(null);
+    setForensicReport(null);
 
+    // ── Route video files to the FastAPI backend ──────────────────────────────
+    if (activeTab === 'media' && file && isVideoFile(file)) {
+      try {
+        const report = await analyzeVideo(file);
+        setForensicReport(report);
+      } catch (err: unknown) {
+        console.error(err);
+        const msg = err instanceof Error ? err.message : 'An error occurred during video analysis.';
+        setError(msg);
+      } finally {
+        setIsAnalyzing(false);
+      }
+      return;
+    }
+
+    // ── Gemini path for images, audio and text ────────────────────────────────
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || process.env.GEMINI_API_KEY || '' });
-      let contents: any;
+      let contents: unknown;
 
       if (activeTab === 'media' && file) {
         const base64Data = await new Promise<string>((resolve, reject) => {
@@ -186,9 +220,10 @@ export function DeepfakeDetector() {
       } else {
         throw new Error("No response from model.");
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
-      setError(err.message || "An error occurred during analysis.");
+      const msg = err instanceof Error ? err.message : 'An error occurred during analysis.';
+      setError(msg);
     } finally {
       setIsAnalyzing(false);
     }
@@ -197,8 +232,10 @@ export function DeepfakeDetector() {
   const clearFile = () => {
     setFile(null);
     setResult(null);
+    setForensicReport(null);
     setHexDump('');
     setFileMeta(null);
+    setError(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -316,7 +353,9 @@ export function DeepfakeDetector() {
                           <div className="text-center space-y-4">
                             <Fingerprint className="w-12 h-12 text-indigo-400 animate-pulse mx-auto" />
                             <p className="text-indigo-300 font-mono text-sm animate-pulse">
-                              {ANALYSIS_STEPS[analysisStep]}
+                              {isVideoFile(file)
+                                ? VIDEO_ANALYSIS_STEPS[analysisStep]
+                                : ANALYSIS_STEPS[analysisStep]}
                             </p>
                           </div>
                         </div>
@@ -556,6 +595,17 @@ export function DeepfakeDetector() {
             </div>
 
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── FastAPI 3-Pillar Report (video files only) ────────────────────── */}
+      <AnimatePresence>
+        {forensicReport && (
+          <VideoForensicsReport
+            report={forensicReport}
+            filename={fileMeta?.name ?? 'video.mp4'}
+            onReset={clearFile}
+          />
         )}
       </AnimatePresence>
     </div>
