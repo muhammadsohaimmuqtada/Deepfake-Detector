@@ -110,6 +110,7 @@ No single detector is unbeatable. This pipeline is designed to be **extended** w
 ```
 Deepfake-Detector/
 ├── backend/                          # Python detection engine
+│   ├── main.py                       # FastAPI server — POST /api/analyze
 │   ├── requirements.txt              # Production Python dependencies
 │   └── src/
 │       ├── pipeline.py               # Main entry point — DeepfakePipeline
@@ -155,6 +156,17 @@ source venv/bin/activate   # On Windows: venv\Scripts\activate
 # 3. Install dependencies
 pip install -r requirements.txt
 ```
+
+### Starting the FastAPI Server
+
+```bash
+cd backend
+pip install -r requirements.txt
+uvicorn main:app --reload
+```
+
+The API will be available at `http://localhost:8000`.  
+Interactive API docs (Swagger UI) are served at `http://localhost:8000/docs`.
 
 ---
 
@@ -266,10 +278,10 @@ The pipeline returns a structured JSON object suitable for direct integration in
 - [x] **Layer 1:** Frequency/FFT Artifact Analyzer (complete)
 - [x] **Layer 1:** MediaPipe Video Face Extractor (complete)
 - [x] **Layer 1:** Ensemble Pipeline & JSON Forensic Report (complete)
+- [x] REST API wrapper (FastAPI) for backend integration
 - [ ] **Layer 2:** rPPG Heartbeat Analyzer — detect missing biological pulse signal
 - [ ] **Layer 3:** Audio-Visual Lip-Sync Desync Analyzer (SyncNet-based)
 - [ ] **Layer 4:** C2PA Content Provenance / Cryptographic Metadata Verification
-- [ ] REST API wrapper (FastAPI) for backend integration
 - [ ] Docker container for one-command deployment
 
 ---
