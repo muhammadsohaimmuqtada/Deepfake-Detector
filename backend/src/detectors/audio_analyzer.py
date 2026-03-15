@@ -147,6 +147,12 @@ class AudioAnalyzer:
                 "confidence": round(float(confidence), 2),
                 "mfcc_mean_variance": round(float(mfcc_result["mean_variance"]), 4),
                 "mfcc_variance_threshold": self.mfcc_var_threshold,
+                "mfcc_delta_mean_variance": round(
+                    float(mfcc_result.get("delta_mean_variance", 0.0)), 4
+                ),
+                "mfcc_delta2_mean_variance": round(
+                    float(mfcc_result.get("delta2_mean_variance", 0.0)), 4
+                ),
                 "spectral_flatness_mean": round(float(flatness_result["mean_flatness"]), 6),
                 "spectral_flatness_threshold": self.spectral_flatness_threshold,
                 "zcr_mean": round(float(zcr_result["zcr_mean"]), 6),
@@ -289,30 +295,68 @@ class AudioAnalyzer:
         self, waveform: np.ndarray, sr: int
     ) -> dict[str, float]:
         """
-        Compute MFCCs and return variance statistics.
+        Compute base MFCCs plus their delta (velocity) and delta-delta
+        (acceleration) coefficients, then return variance statistics across
+        all three feature sets.
 
-        AI voices are too smooth → the variance of each MFCC coefficient
-        across time is lower than for natural human speech.
+        AI voices produce unnaturally smooth spectral trajectories.  This
+        manifests as abnormally low variance not only in the base MFCCs but
+        particularly in the delta and delta-delta coefficients — capturing the
+        fact that synthetic voices struggle to replicate the natural acoustic
+        *acceleration* of human vocal-cord dynamics over time.
 
-        :return: {'mean_variance': float, 'std_variance': float}
+        :return: dict with mean/std variance for the combined feature matrix
+                 plus separate delta and delta-delta variance means.
         """
         try:
             import librosa  # noqa: PLC0415
 
+            # ── Base MFCCs — static spectral envelope ───────────────────────
             mfccs = librosa.feature.mfcc(
                 y=waveform, sr=sr, n_mfcc=self.n_mfcc
             )  # shape: (n_mfcc, T)
-            # Variance of each coefficient across time frames
-            coeff_variances = np.var(mfccs, axis=1)
+
+            # ── Delta MFCCs — velocity (rate of change) ─────────────────────
+            # AI voices produce unnaturally smooth transitions here.
+            delta_mfccs = librosa.feature.delta(mfccs)
+
+            # ── Delta-delta MFCCs — acceleration (second-order dynamics) ────
+            # Human speech has natural bursts of acoustic acceleration;
+            # synthetic voices are mathematically too smooth at this level.
+            delta2_mfccs = librosa.feature.delta(mfccs, order=2)
+
+            # Stack all three sets for a comprehensive variance analysis
+            # (shape: 3*n_mfcc × T)
+            all_features = np.vstack([mfccs, delta_mfccs, delta2_mfccs])
+            coeff_variances = np.var(all_features, axis=1)
             mean_var = float(np.mean(coeff_variances))
             std_var = float(np.std(coeff_variances))
+
+            delta_mean_var = float(np.mean(np.var(delta_mfccs, axis=1)))
+            delta2_mean_var = float(np.mean(np.var(delta2_mfccs, axis=1)))
+
             logger.debug(
-                "AudioAnalyzer — MFCC variance: mean=%.4f, std=%.4f", mean_var, std_var
+                "AudioAnalyzer — MFCC variance: base_mean=%.4f, "
+                "delta_mean=%.4f, delta2_mean=%.4f, combined_mean=%.4f",
+                float(np.mean(np.var(mfccs, axis=1))),
+                delta_mean_var,
+                delta2_mean_var,
+                mean_var,
             )
-            return {"mean_variance": mean_var, "std_variance": std_var}
+            return {
+                "mean_variance": mean_var,
+                "std_variance": std_var,
+                "delta_mean_variance": delta_mean_var,
+                "delta2_mean_variance": delta2_mean_var,
+            }
         except Exception as exc:  # noqa: BLE001
             logger.error("AudioAnalyzer — MFCC computation failed: %s", exc)
-            return {"mean_variance": self.mfcc_var_threshold, "std_variance": 0.0}
+            return {
+                "mean_variance": self.mfcc_var_threshold,
+                "std_variance": 0.0,
+                "delta_mean_variance": 0.0,
+                "delta2_mean_variance": 0.0,
+            }
 
     @staticmethod
     def _compute_spectral_flatness(
@@ -451,6 +495,8 @@ class AudioAnalyzer:
             "confidence": 0.0,
             "mfcc_mean_variance": 0.0,
             "mfcc_variance_threshold": MFCC_VARIANCE_FAKE_THRESHOLD,
+            "mfcc_delta_mean_variance": 0.0,
+            "mfcc_delta2_mean_variance": 0.0,
             "spectral_flatness_mean": 0.0,
             "spectral_flatness_threshold": SPECTRAL_FLATNESS_FAKE_THRESHOLD,
             "zcr_mean": 0.0,
