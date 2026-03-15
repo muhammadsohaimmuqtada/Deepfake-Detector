@@ -1,7 +1,5 @@
 <div align="center">
 
-<img width="1200" height="475" alt="Deepfake Detector Banner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-
 # 🔍 Deepfake Detector
 
 **A production-ready, enterprise-grade deepfake detection pipeline.**  
@@ -10,6 +8,7 @@ Built on mathematical frequency analysis (FFT) — no black boxes, no GPU requir
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)](https://python.org)
 [![OpenCV](https://img.shields.io/badge/OpenCV-4.8%2B-green?logo=opencv)](https://opencv.org)
 [![MediaPipe](https://img.shields.io/badge/MediaPipe-0.10%2B-orange)](https://mediapipe.dev)
+[![React](https://img.shields.io/badge/React-19%2B-61dafb?logo=react)](https://react.dev)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 </div>
@@ -21,7 +20,9 @@ Built on mathematical frequency analysis (FFT) — no black boxes, no GPU requir
 - [Overview — The Problem & Solution](#overview)
 - [Architecture](#architecture)
 - [Why This Approach Is Trusted](#why-trusted)
-- [Installation](#installation)
+- [Repository Structure](#repository-structure)
+- [Backend Setup (Python Detection Engine)](#backend-setup)
+- [Frontend Setup (Web UI)](#frontend-setup)
 - [Usage](#usage)
 - [Output — Forensic Report](#output)
 - [Roadmap](#roadmap)
@@ -76,9 +77,9 @@ The pipeline follows a clean, three-stage forensic workflow:
 
 | Module | File | Responsibility |
 |---|---|---|
-| **VideoExtractor** | `src/utils/video_extractor.py` | Extracts face regions from video frames using Google MediaPipe. Uses `frame_skip` to process 1-in-N frames and applies 10% bounding box padding to capture jawline blending seams. |
-| **FrequencyAnalyzer** | `src/detectors/frequency_analyzer.py` | Applies Fast Fourier Transform (FFT) to each face crop. Computes the 1D azimuthal power spectrum and measures high-frequency variance — the mathematical signature of GAN/diffusion upsampling. |
-| **DeepfakePipeline** | `src/pipeline.py` | Orchestrates the full pipeline, aggregates per-frame scores, and generates a structured JSON forensic report. |
+| **VideoExtractor** | `backend/src/utils/video_extractor.py` | Extracts face regions from video frames using Google MediaPipe. Uses `frame_skip` to process 1-in-N frames and applies 10% bounding box padding to capture jawline blending seams. |
+| **FrequencyAnalyzer** | `backend/src/detectors/frequency_analyzer.py` | Applies Fast Fourier Transform (FFT) to each face crop. Computes the 1D azimuthal power spectrum and measures high-frequency variance — the mathematical signature of GAN/diffusion upsampling. |
+| **DeepfakePipeline** | `backend/src/pipeline.py` | Orchestrates the full pipeline, aggregates per-frame scores, and generates a structured JSON forensic report. |
 
 ---
 
@@ -104,14 +105,48 @@ No single detector is unbeatable. This pipeline is designed to be **extended** w
 
 ---
 
-## Installation
+## Repository Structure
 
-**Prerequisites:** Python 3.10+
+```
+Deepfake-Detector/
+├── backend/                          # Python detection engine
+│   ├── requirements.txt              # Production Python dependencies
+│   └── src/
+│       ├── pipeline.py               # Main entry point — DeepfakePipeline
+│       ├── detectors/
+│       │   ├── __init__.py
+│       │   └── frequency_analyzer.py # FFT-based artifact detection
+│       └── utils/
+│           ├── __init__.py
+│           └── video_extractor.py    # MediaPipe face extraction from video
+├── frontend/                         # React/TypeScript web UI
+│   ├── index.html
+│   ├── package.json
+│   ├── tsconfig.json
+│   ├── vite.config.ts
+│   ├── .env.example
+│   └── src/
+│       ├── main.tsx
+│       ├── App.tsx
+│       ├── index.css
+│       ├── components/
+│       │   ├── DeepfakeDetector.tsx
+│       │   └── Chatbot.tsx
+│       └── lib/
+│           └── utils.ts
+└── README.md
+```
+
+---
+
+## Backend Setup
+
+**Python Detection Engine — Prerequisites:** Python 3.10+
 
 ```bash
 # 1. Clone the repository
 git clone https://github.com/muhammadsohaimmuqtada/Deepfake-Detector.git
-cd Deepfake-Detector
+cd Deepfake-Detector/backend
 
 # 2. Create and activate a virtual environment (recommended)
 python -m venv venv
@@ -123,13 +158,37 @@ pip install -r requirements.txt
 
 ---
 
-## Usage
+## Frontend Setup
 
-### Command Line
-
-Analyze a video file and receive a full forensic report as JSON output:
+**Web UI — Prerequisites:** Node.js 18+
 
 ```bash
+# From the repository root
+cd frontend
+
+# 1. Install dependencies
+npm install
+
+# 2. Copy the environment file and add your Gemini API key
+cp .env.example .env
+# Edit .env and set GEMINI_API_KEY
+
+# 3. Start the development server
+npm run dev
+```
+
+The UI will be available at `http://localhost:3000`.
+
+---
+
+## Usage
+
+### Command Line (Backend)
+
+Navigate to the `backend/` directory and analyze a video file:
+
+```bash
+cd backend
 python src/pipeline.py path/to/video.mp4
 ```
 
@@ -146,6 +205,9 @@ python src/pipeline.py path/to/video.mp4 --frame-skip 5 --threshold 0.12
 ### Python Library
 
 ```python
+import sys
+sys.path.insert(0, "backend")
+
 from src.pipeline import DeepfakePipeline
 
 pipeline = DeepfakePipeline(frame_skip=5, freq_threshold=0.15)
@@ -196,24 +258,6 @@ The pipeline returns a structured JSON object suitable for direct integration in
 | `mean_artifact_score` | Average FFT high-frequency variance across all frames |
 | `elapsed_seconds` | Total wall-clock processing time |
 | `forensic_report` | Per-frame breakdown for audit and explainability |
-
----
-
-## Repository Structure
-
-```
-Deepfake-Detector/
-├── src/
-│   ├── pipeline.py                  # Main entry point — DeepfakePipeline
-│   ├── detectors/
-│   │   ├── __init__.py
-│   │   └── frequency_analyzer.py    # FFT-based artifact detection
-│   └── utils/
-│       ├── __init__.py
-│       └── video_extractor.py       # MediaPipe face extraction from video
-├── requirements.txt                 # Production Python dependencies
-└── README.md
-```
 
 ---
 
