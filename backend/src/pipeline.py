@@ -57,9 +57,31 @@ AUDIO_WEIGHT = 0.25   # Layer 3 — Acoustic / Voice Cloning
 # Ensemble fake threshold — weighted combined score above this → FAKE
 ENSEMBLE_FAKE_THRESHOLD = 0.50
 
+# Dynamic weight boosting: when a single layer is strongly confident about a
+# FAKE result its weight is increased to reflect the severity of that attack
+# vector (e.g. voice-clone attack where the face passes visual checks).
+STRONG_SIGNAL_THRESHOLD = 0.70   # fake_prob above this triggers boost
+AUDIO_BOOST_MAX = 0.50           # maximum extra weight added to the audio layer
+RPPG_BOOST_MAX = 0.15            # maximum extra weight added to the rPPG layer
+
 # Default number of consecutive face frames fed to the rPPG analyzer
 DEFAULT_RPPG_WINDOW = 60
 
+
+def _compute_boost(fake_prob: float, threshold: float, max_boost: float) -> float:
+    """
+    Compute a proportional weight boost for a layer whose fake probability
+    exceeds *threshold*.
+
+    :param fake_prob: The layer's fake probability in [0, 1].
+    :param threshold: Minimum fake_prob required to trigger a boost.
+    :param max_boost: Maximum additional weight returned when fake_prob == 1.0.
+    :return: Additional weight in [0, max_boost].
+    """
+    if fake_prob < threshold:
+        return 0.0
+    scale = (fake_prob - threshold) / (1.0 - threshold + 1e-8)
+    return max_boost * scale
 
 class DeepfakePipeline:
     """
@@ -76,13 +98,14 @@ class DeepfakePipeline:
     def __init__(
         self,
         frame_skip: int = 5,
-        freq_threshold: float = 0.15,
+        freq_threshold: float = 0.60,
         rppg_window: int = DEFAULT_RPPG_WINDOW,
         fps: float = 30.0,
     ):
         """
         :param frame_skip:    Analyze every Nth frame (reduces compute, preserves accuracy).
-        :param freq_threshold: FFT artifact score above which a single frame is flagged (Layer 1).
+        :param freq_threshold: Spectral Energy Ratio above which a single frame is flagged (Layer 1).
+                               Calibrated for the new high/low band energy ratio metric (default: 0.60).
         :param rppg_window:   Number of consecutive face frames to pass to the rPPG analyzer.
         :param fps:           Effective frame rate *after* frame-skip, used by the rPPG filter.
                               Formula: effective_fps = source_fps / frame_skip.
@@ -188,12 +211,40 @@ class DeepfakePipeline:
         else:
             audio_fake_prob = 0.5
 
+        # ── Dynamic weight boosting (Weighted Ensemble) ───────────────────────
+        # If a single layer is strongly confident about a FAKE verdict, its
+        # weight is boosted to reflect the severity of that specific attack
+        # vector.  The canonical example is a *voice-clone attack*: the face
+        # passes the visual and biological checks, but the audio is definitively
+        # synthetic.  Without boosting, the audio layer (base weight 0.25) can
+        # be drowned out by two "REAL" verdicts.  With boosting, a very strong
+        # audio FAKE signal raises the audio weight up to (0.25 + 0.50 = 0.75)
+        # before re-normalisation, ensuring the voice clone is not missed.
+        audio_boost = 0.0
+        if audio_conclusive and audio_fake_prob >= STRONG_SIGNAL_THRESHOLD:
+            audio_boost = _compute_boost(audio_fake_prob, STRONG_SIGNAL_THRESHOLD, AUDIO_BOOST_MAX)
+            logger.info(
+                "Ensemble — audio boost applied: +%.3f (audio_fake_prob=%.3f)",
+                audio_boost,
+                audio_fake_prob,
+            )
+
+        rppg_boost = 0.0
+        if rppg_conclusive and rppg_fake_prob >= STRONG_SIGNAL_THRESHOLD:
+            rppg_boost = _compute_boost(rppg_fake_prob, STRONG_SIGNAL_THRESHOLD, RPPG_BOOST_MAX)
+            logger.info(
+                "Ensemble — rPPG boost applied: +%.3f (rppg_fake_prob=%.3f)",
+                rppg_boost,
+                rppg_fake_prob,
+            )
+
         # ── Ensemble scoring (3-pillar) ────────────────────────────────────────
-        # Re-normalise weights based on which layers returned conclusive results.
+        # Re-normalise weights based on which layers returned conclusive results
+        # and incorporate any dynamic boosts.
         active_weights: dict[str, float] = {
             "freq": FREQ_WEIGHT,
-            "rppg": RPPG_WEIGHT if rppg_conclusive else 0.0,
-            "audio": AUDIO_WEIGHT if audio_conclusive else 0.0,
+            "rppg": (RPPG_WEIGHT + rppg_boost) if rppg_conclusive else 0.0,
+            "audio": (AUDIO_WEIGHT + audio_boost) if audio_conclusive else 0.0,
         }
         total_weight = sum(active_weights.values())
         if total_weight == 0.0:
@@ -277,9 +328,9 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--threshold",
         type=float,
-        default=0.15,
+        default=0.60,
         metavar="T",
-        help="FFT artifact score threshold per frame (default: 0.15).",
+        help="Spectral Energy Ratio threshold per frame (default: 0.60). Higher = more strict.",
     )
     parser.add_argument(
         "--rppg-window",

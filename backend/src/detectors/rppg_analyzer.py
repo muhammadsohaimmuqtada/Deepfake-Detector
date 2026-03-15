@@ -29,9 +29,9 @@ from scipy.signal import butter, sosfilt
 logger = logging.getLogger(__name__)
 
 # ── Signal quality constants ──────────────────────────────────────────────────
-HEART_RATE_LOW_HZ = 0.7    # 42 BPM lower bound
+HEART_RATE_LOW_HZ = 0.75   # 45 BPM lower bound
 HEART_RATE_HIGH_HZ = 3.0   # 180 BPM upper bound
-FILTER_ORDER = 4            # Butterworth filter order
+FILTER_ORDER = 5            # Butterworth filter order
 MIN_FRAMES = 15             # Minimum frames required for a meaningful analysis
 SNR_FAKE_THRESHOLD = 2.0    # Peak-SNR below this → likely synthetic
 

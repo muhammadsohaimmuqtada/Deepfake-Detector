@@ -5,14 +5,26 @@ import logging
 # Setup logging for enterprise-level tracking
 logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
 
-HIGH_FREQ_TAIL_RATIO = 0.2  # Fraction of the spectrum considered high-frequency
+# Fraction of the 1-D spectrum used for the low-frequency and high-frequency bands.
+# The low band covers the first SPECTRAL_BAND_RATIO of the radial profile;
+# the high band covers the last SPECTRAL_BAND_RATIO.
+SPECTRAL_BAND_RATIO = 0.30
+
+# Minimum face crop dimension (pixels). Crops smaller than this are extremely
+# pixelated and produce artificially inflated variance — skip them.
+MIN_FACE_SIZE = 32
 
 
 class FrequencyAnalyzer:
-    def __init__(self, high_freq_threshold=0.15):
+    def __init__(self, high_freq_threshold=0.60):
         """
         Initializes the FrequencyAnalyzer.
-        :param high_freq_threshold: The threshold above which high-frequency noise is flagged as synthetic.
+
+        :param high_freq_threshold: Spectral Energy Ratio above which a face crop is
+            flagged as synthetic.  The ratio is high_band_mean / low_band_mean
+            after shifting the log-magnitude PSD to be strictly positive.
+            Natural images have a ratio well below 0.60; GAN-generated images
+            (with upsampling grid artefacts) exceed this value.
         """
         self.threshold = high_freq_threshold
 
@@ -48,6 +60,13 @@ class FrequencyAnalyzer:
     def detect_artifacts(self, face_image):
         """
         Analyzes a face image for synthetic generation artifacts using FFT.
+
+        The key metric is the **Spectral Energy Ratio**: the mean energy in the
+        high-frequency band divided by the mean energy in the low-frequency band.
+        Natural images follow a steep 1/f^n power decay, so this ratio is low.
+        GAN-generated images suffer from upsampling grid artefacts that
+        artificially elevate high-frequency energy, raising the ratio.
+
         :param face_image: NumPy array of the cropped face (BGR or Grayscale).
         :return: Dict containing the result and confidence score.
         """
@@ -56,24 +75,52 @@ class FrequencyAnalyzer:
         else:
             gray = face_image
 
+        h, w = gray.shape
+
+        # Fallback: extremely small crops are heavily pixelated and produce
+        # artificially elevated variance that would skew the score.
+        if h < MIN_FACE_SIZE or w < MIN_FACE_SIZE:
+            logging.warning(
+                "Face crop too small (%dx%d px) — skipping FFT analysis.", w, h
+            )
+            return {
+                "is_fake": False,
+                "artifact_score": 0.0,
+                "confidence": 0.0,
+                "module": "Frequency/FFT Analyzer",
+                "verdict": "INCONCLUSIVE",
+                "reason": "face_too_small",
+            }
+
         # 1. Apply Fast Fourier Transform (FFT)
         f = np.fft.fft2(gray)
         fshift = np.fft.fftshift(f)
-        
-        # 2. Calculate the magnitude spectrum (Power spectrum)
+
+        # 2. Log-magnitude spectrum (dB scale)
         magnitude_spectrum = 20 * np.log(np.abs(fshift) + 1e-8)
 
-        # 3. Calculate 1D Azimuthal Average
-        # Real images decay smoothly. GANs/Deepfakes have abnormal bumps in the high-frequency tail.
+        # 3. 1D Azimuthal Average → radial power profile
+        # Real images decay smoothly from centre outward; GANs have abnormal
+        # bumps in the high-frequency tail.
         psd_1d = self.azimuthal_average(magnitude_spectrum)
-        
-        # 4. Analyze High Frequencies (The "Deepfake Signature" zone)
-        # We look at the last HIGH_FREQ_TAIL_RATIO of the spectrum (the highest frequencies)
-        high_freq_tail = psd_1d[-int(len(psd_1d) * HIGH_FREQ_TAIL_RATIO):]
-        mean_tail = np.mean(high_freq_tail)
-        noise_score = np.var(high_freq_tail) / (mean_tail + 1e-8)
 
-        logging.info(f"Calculated High-Frequency Artifact Score: {noise_score:.4f}")
+        # 4. Spectral Energy Ratio
+        # Shift the profile to be strictly positive before computing the ratio
+        # (log-magnitudes can be negative for near-zero amplitudes).
+        psd_positive = psd_1d - np.min(psd_1d) + 1.0  # +1.0: shift to strictly positive (log-magnitudes can go negative)
+        n = len(psd_positive)
+        n_band = max(1, int(n * SPECTRAL_BAND_RATIO))
+
+        low_band_mean = np.mean(psd_positive[:n_band])    # mean energy in the low-frequency band
+        high_band_mean = np.mean(psd_positive[-n_band:])  # mean energy in the high-frequency band
+
+        # Ratio: natural images → low value; GANs → elevated value
+        noise_score = high_band_mean / (low_band_mean + 1e-8)
+
+        logging.info(
+            "Spectral Energy Ratio (FFT Score): %.4f  (low=%.2f, high=%.2f)",
+            noise_score, low_band_mean, high_band_mean,
+        )
 
         # 5. Make a determination based on the threshold
         is_fake = bool(noise_score > self.threshold)
@@ -86,7 +133,7 @@ class FrequencyAnalyzer:
             "is_fake": is_fake,
             "artifact_score": float(noise_score),
             "confidence": float(confidence),
-            "module": "Frequency/FFT Analyzer"
+            "module": "Frequency/FFT Analyzer",
         }
 
 # --- Quick Test Block ---
