@@ -1,0 +1,5 @@
+{
+  "name": "Deepfake Detector",
+  "description": "An AI-powered app that analyzes images, videos, and text to determine if they are deepfakes or AI-generated. Includes a chatbot for further questions.",
+  "requestFramePermissions": []
+}
