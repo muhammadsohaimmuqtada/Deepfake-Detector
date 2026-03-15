@@ -9,7 +9,9 @@ Orchestrates the full forensic analysis pipeline (Defense-in-Depth):
         ↓
     Layer 2 — RPPGAnalyzer       (temporal heartbeat / rPPG analysis)
         ↓
-    Ensemble Scoring  →  Forensic Report
+    Layer 3 — AudioAnalyzer      (acoustic / voice cloning detection)
+        ↓
+    Ensemble Scoring  →  Forensic Report (3-pillar verdict)
 
 Usage (CLI):
     python src/pipeline.py <path_to_video> [--frame-skip N] [--threshold T]
@@ -29,6 +31,7 @@ import sys
 import time
 from typing import Any
 
+from src.detectors.audio_analyzer import AudioAnalyzer
 from src.detectors.frequency_analyzer import FrequencyAnalyzer
 from src.detectors.rppg_analyzer import RPPGAnalyzer
 from src.utils.video_extractor import VideoExtractor
@@ -46,9 +49,10 @@ logger = logging.getLogger(__name__)
 FAKE_FRAME_RATIO_THRESHOLD = 0.40
 MAX_CONFIDENCE_PCT = 99.0
 
-# Layer 2 (rPPG): weight in the ensemble score (0–1); Layer 1 gets 1 - RPPG_WEIGHT
-RPPG_WEIGHT = 0.40
-FREQ_WEIGHT = 1.0 - RPPG_WEIGHT
+# Layer weights in the ensemble score (must sum to 1.0 when all layers are active)
+FREQ_WEIGHT = 0.40    # Layer 1 — Visual / FFT
+RPPG_WEIGHT = 0.35    # Layer 2 — Biological / rPPG
+AUDIO_WEIGHT = 0.25   # Layer 3 — Acoustic / Voice Cloning
 
 # Ensemble fake threshold — weighted combined score above this → FAKE
 ENSEMBLE_FAKE_THRESHOLD = 0.50
@@ -65,7 +69,8 @@ class DeepfakePipeline:
     - VideoExtractor : isolates face regions from sampled video frames.
     - FrequencyAnalyzer (Layer 1): per-frame FFT-based GAN/diffusion artifact detection.
     - RPPGAnalyzer   (Layer 2): temporal rPPG heartbeat analysis over a frame window.
-    - Ensemble aggregation: fuses both layer scores into a final verdict.
+    - AudioAnalyzer  (Layer 3): acoustic MFCC / spectral analysis for voice cloning detection.
+    - Ensemble aggregation: fuses all three layer scores into a final 3-pillar verdict.
     """
 
     def __init__(
@@ -85,6 +90,7 @@ class DeepfakePipeline:
         self.extractor = VideoExtractor(frame_skip=frame_skip)
         self.freq_analyzer = FrequencyAnalyzer(high_freq_threshold=freq_threshold)
         self.rppg_analyzer = RPPGAnalyzer(fps=fps)
+        self.audio_analyzer = AudioAnalyzer()
         self.rppg_window = rppg_window
 
         logger.info(
@@ -112,6 +118,18 @@ class DeepfakePipeline:
         # Collect face frames for the rPPG window
         rppg_frame_buffer: list = []
 
+        # ── Layer 3: Audio analysis (runs before the frame loop) ─────────────
+        # Audio extraction is independent of frame processing and is executed
+        # sequentially here so the result is ready for ensemble scoring later.
+        logger.info("Pipeline — running Layer 3 (Audio Forensics) on: %s", video_path)
+        audio_result = self.audio_analyzer.analyze(video_path)
+        audio_conclusive = audio_result.get("verdict") != "INCONCLUSIVE"
+        if not audio_conclusive:
+            logger.info(
+                "AudioAnalyzer returned INCONCLUSIVE (%s) — ensemble will compensate.",
+                audio_result.get("reason", "unknown"),
+            )
+
         for face_image in self.extractor.extract_faces_from_video(video_path):
             # ── Layer 1: per-frame FFT analysis ──────────────────────────────
             freq_result = self.freq_analyzer.detect_artifacts(face_image)
@@ -137,6 +155,7 @@ class DeepfakePipeline:
                 "elapsed_seconds": round(elapsed, 3),
                 "layer1_fft_report": [],
                 "layer2_rppg_report": None,
+                "layer3_audio_report": audio_result,
                 "message": "No faces could be detected. Video may be low quality or contain no human subjects.",
             }
 
@@ -147,9 +166,6 @@ class DeepfakePipeline:
         mean_artifact_score = (
             sum(r["artifact_score"] for r in frame_reports) / frames_analyzed
         )
-        mean_freq_confidence = (
-            sum(r["confidence"] for r in frame_reports) / frames_analyzed
-        )
 
         # Layer 1 fake probability (0–1)
         freq_fake_prob = fake_frame_ratio
@@ -159,22 +175,35 @@ class DeepfakePipeline:
         rppg_conclusive = rppg_result.get("verdict") != "INCONCLUSIVE"
 
         if rppg_conclusive:
-            # Convert rPPG confidence to a fake probability (0–1)
             rppg_conf = float(rppg_result["confidence"]) / 100.0
             rppg_fake_prob = rppg_conf if rppg_result["is_fake"] else (1.0 - rppg_conf)
         else:
-            # Inconclusive → neutral; rely entirely on Layer 1
             rppg_fake_prob = 0.5
-            logger.info("rPPG returned INCONCLUSIVE — ensemble relies solely on Layer 1.")
+            logger.info("rPPG returned INCONCLUSIVE — ensemble compensates on remaining layers.")
 
-        # ── Ensemble scoring ──────────────────────────────────────────────────
-        # Weighted combination of both layers → single ensemble fake probability
-        if rppg_conclusive:
-            ensemble_fake_prob = (
-                FREQ_WEIGHT * freq_fake_prob + RPPG_WEIGHT * rppg_fake_prob
-            )
+        # ── Layer 3: Audio fake probability ───────────────────────────────────
+        if audio_conclusive:
+            audio_conf = float(audio_result["confidence"]) / 100.0
+            audio_fake_prob = audio_conf if audio_result["is_fake"] else (1.0 - audio_conf)
         else:
-            ensemble_fake_prob = freq_fake_prob
+            audio_fake_prob = 0.5
+
+        # ── Ensemble scoring (3-pillar) ────────────────────────────────────────
+        # Re-normalise weights based on which layers returned conclusive results.
+        active_weights: dict[str, float] = {
+            "freq": FREQ_WEIGHT,
+            "rppg": RPPG_WEIGHT if rppg_conclusive else 0.0,
+            "audio": AUDIO_WEIGHT if audio_conclusive else 0.0,
+        }
+        total_weight = sum(active_weights.values())
+        if total_weight == 0.0:
+            total_weight = 1.0  # fallback (should never happen)
+
+        ensemble_fake_prob = (
+            active_weights["freq"] * freq_fake_prob
+            + active_weights["rppg"] * rppg_fake_prob
+            + active_weights["audio"] * audio_fake_prob
+        ) / total_weight
 
         is_fake = ensemble_fake_prob >= ENSEMBLE_FAKE_THRESHOLD
         verdict = "FAKE" if is_fake else "REAL"
@@ -194,30 +223,35 @@ class DeepfakePipeline:
             "verdict": verdict,
             "is_fake": is_fake,
             "overall_confidence": overall_confidence,
-            # ── Layer 1 summary ──
+            # ── Layer 1 (Visual / FFT) summary ──
             "frames_analyzed": frames_analyzed,
             "frames_flagged": frames_flagged,
             "fake_frame_ratio": round(fake_frame_ratio, 4),
             "mean_artifact_score": round(mean_artifact_score, 6),
             # ── Ensemble metrics ──
             "ensemble_fake_probability": round(ensemble_fake_prob, 4),
-            "freq_layer_weight": 1.0 if not rppg_conclusive else FREQ_WEIGHT,
-            "rppg_layer_weight": RPPG_WEIGHT if rppg_conclusive else 0.0,
+            "layer_weights": {
+                "visual_fft": round(active_weights["freq"] / total_weight, 4),
+                "biological_rppg": round(active_weights["rppg"] / total_weight, 4),
+                "acoustic_audio": round(active_weights["audio"] / total_weight, 4),
+            },
             "elapsed_seconds": round(elapsed, 3),
             # ── Detailed per-layer reports ──
             "layer1_fft_report": frame_reports,
             "layer2_rppg_report": rppg_result,
+            "layer3_audio_report": audio_result,
         }
 
         logger.info(
             "Analysis complete — verdict=%s, confidence=%.2f%%, ensemble_prob=%.4f, "
-            "frames=%d, flagged=%d, rppg_snr=%.3f, elapsed=%.3fs",
+            "frames=%d, flagged=%d, rppg_snr=%.3f, audio_score=%.4f, elapsed=%.3fs",
             verdict,
             overall_confidence,
             ensemble_fake_prob,
             frames_analyzed,
             frames_flagged,
             rppg_result.get("rppg_snr", 0.0),
+            audio_result.get("artifact_score", 0.0),
             elapsed,
         )
         return report
@@ -228,7 +262,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         prog="deepfake-detector",
         description=(
             "Production-ready Deepfake Detection Pipeline — "
-            "Layer 1: FFT frequency analysis | Layer 2: rPPG heartbeat analysis"
+            "Layer 1: FFT frequency analysis | Layer 2: rPPG heartbeat analysis | "
+            "Layer 3: Audio forensics / voice cloning detection"
         ),
     )
     parser.add_argument("video_path", help="Path to the video file to analyze.")
